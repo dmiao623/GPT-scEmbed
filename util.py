@@ -1,9 +1,12 @@
+from anndata import AnnData
+import copy
 import numpy as np
 import pandas as pd
 import json
 import pickle
 from pathlib import Path
-from typing import List
+import scanpy as sc
+from typing import Dict, List
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -23,12 +26,33 @@ def retrieve_gpt_gene_embeddings(path: Path = data_dir / "GenePT_gene_embedding_
     N_dims = len(gene_embeddings[next(iter(gene_embeddings))])
     return (N_genes, N_dims, gene_embeddings)
 
-def generate_random_embeddings(N_genes, N_dims, gene_names: List[str]):
+def generate_random_embeddings(N_genes: int, N_dims: int, gene_names: List[str]):
     assert N_genes == len(gene_names)
     return {gene_name: np.random.normal(size=N_dims) for gene_name in gene_names}
 
 def retrieve_gene_info(path: Path = data_dir / "gene_info_table.csv"):
     return pd.read_csv(path)
+
+def generate_w_gpt_embeddings(N_dims: int, 
+                              sc_data: AnnData, 
+                              gpt_embeddings: Dict[str, np.ndarray]) -> np.ndarray:
+    sc_data = sc_data.copy()
+    sc.pp.normalize_total(sc_data)
+    sc.pp.log1p(sc_data)
+    
+    if isinstance(sc_data.X, np.ndarray):
+        X_dense = sc_data.X
+    else:
+        X_dense = sc_data.X.toarray()
+    X_prob = X_dense / X_dense.sum(axis=1, keepdims=True)
+
+    Y = []
+    for gene in sc_data.var_names:
+        embedding = gpt_embeddings.get(gene, np.zeros(N_dims))
+        Y.append(embedding)
+    Y = np.array(Y)
+
+    return X_prob @ Y
 
 def logistic_random_forest_eval(X_array_tf, y_array_tf, display=True):
     cv = StratifiedKFold(n_splits=10)
